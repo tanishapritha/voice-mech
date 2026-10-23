@@ -105,6 +105,7 @@ export default function App() {
       if (!result.success || !result.verified) throw new Error("Backend did not verify the committed result.");
       setDbStatus(await api.getStatus());
       if (active) setEvents(await api.events(active.session_id));
+      if (!active) { setNotice("Verified DB write: status is " + result.status + ", revision " + result.revision + "."); return; }
       const responseText = "Confirmed. Status is now " + result.status + ". Revision " + result.revision + " is saved.";
       setNotice(responseText);
       if (active) {
