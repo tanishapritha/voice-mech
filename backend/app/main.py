@@ -1,6 +1,5 @@
 from contextlib import asynccontextmanager
 from uuid import UUID
-import secrets
 
 from fastapi import Depends, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -11,6 +10,7 @@ from app.config import get_settings
 from app.db import DemoStatus, SessionLocal, TraceEvent, VoiceSession, initialize_database
 from app.schemas import DemoStatusOut, EventOut, SessionCreated, ToolResultOut, UpdateDemoStatusIn
 from app.services import create_session, end_session, run_update_demo_tool
+from app.voice import router as voice_router
 
 settings = get_settings()
 
@@ -22,8 +22,14 @@ async def lifespan(_: FastAPI):
 
 
 app = FastAPI(title="Voice Mech API", version="0.1.0", lifespan=lifespan)
-app.add_middleware(CORSMiddleware, allow_origins=[settings.frontend_origin], allow_credentials=False,
-                   allow_methods=["GET", "POST", "OPTIONS"], allow_headers=["Content-Type", "X-Request-ID"])
+app.include_router(voice_router)
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[settings.frontend_origin],
+    allow_credentials=False,
+    allow_methods=["GET", "POST", "OPTIONS"],
+    allow_headers=["Content-Type", "X-Request-ID"],
+)
 
 
 def get_db():
@@ -75,26 +81,14 @@ def read_demo_status(db: Session = Depends(get_db)):
 @app.post("/api/v1/tools/update-demo-status", response_model=ToolResultOut)
 def update_demo_status(body: UpdateDemoStatusIn, db: Session = Depends(get_db)):
     try:
-        return run_update_demo_tool(db, status=body.status, idempotency_key=body.idempotency_key,
-                                    session_id=body.session_id, turn_id=body.turn_id)
+        return run_update_demo_tool(
+            db,
+            status=body.status,
+            idempotency_key=body.idempotency_key,
+            session_id=body.session_id,
+            turn_id=body.turn_id,
+        )
     except ValueError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     except Exception as exc:
         raise HTTPException(status_code=500, detail="Tool execution failed; no success was reported.") from exc
-
-
-@app.post("/api/v1/voice/token")
-def create_voice_token():
-    if not settings.livekit_url or not settings.livekit_api_key or not settings.livekit_api_secret:
-        raise HTTPException(status_code=503, detail="LiveKit credentials are not configured.")
-    try:
-        from livekit import api
-        room_name = f"voice-mech-{secrets.token_hex(8)}"
-        token = (api.AccessToken(settings.livekit_api_key, settings.livekit_api_secret)
-                 .with_identity(f"web-{secrets.token_hex(5)}")
-                 .with_name("Voice Mech tester")
-                 .with_grants(api.VideoGrants(room_join=True, room=room_name, can_publish=True, can_subscribe=True))
-                 .with_ttl(settings.session_token_ttl_seconds))
-        return {"url": settings.livekit_url, "token": token.to_jwt(), "room_name": room_name}
-    except Exception as exc:
-        raise HTTPException(status_code=500, detail="Could not create voice token.") from exc
