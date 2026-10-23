@@ -87,7 +87,7 @@ export default function App() {
     setBusy(true); recognitionRef.current?.stop(); setListening(false);
     try {
       await api.endSession(active.session_id);
-      sessionRef.current = null; setSession(null); setEvents([]);
+      sessionRef.current = null; setSession(null); setEvents([]); setTranscript(""); setInterim("");
       setNotice("Session ended. Writes from this session are no longer accepted.");
     } catch (e) { setError(e instanceof Error ? e.message : "Could not end session."); }
     finally { setBusy(false); await refresh(); }
