@@ -67,7 +67,9 @@ def stop_session(session_id: UUID, db: Session = Depends(get_db)):
 def session_events(session_id: UUID, db: Session = Depends(get_db)):
     if db.get(VoiceSession, session_id) is None:
         raise HTTPException(status_code=404, detail="Session not found.")
-    return db.query(TraceEvent).filter(TraceEvent.session_id == session_id).order_by(TraceEvent.id.asc()).all()
+    return db.query(TraceEvent).filter(
+        TraceEvent.session_id == session_id
+    ).order_by(TraceEvent.id.asc()).all()
 
 
 @app.get("/api/v1/demo/status", response_model=DemoStatusOut)
@@ -82,13 +84,13 @@ def read_demo_status(db: Session = Depends(get_db)):
 def update_demo_status(body: UpdateDemoStatusIn, db: Session = Depends(get_db)):
     try:
         return run_update_demo_tool(
-            db,
-            status=body.status,
-            idempotency_key=body.idempotency_key,
-            session_id=body.session_id,
-            turn_id=body.turn_id,
+            db, status=body.status, idempotency_key=body.idempotency_key,
+            session_id=body.session_id, turn_id=body.turn_id,
         )
     except ValueError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     except Exception as exc:
-        raise HTTPException(status_code=500, detail="Tool execution failed; no success was reported.") from exc
+        raise HTTPException(
+            status_code=500,
+            detail="Tool execution failed; no success was reported.",
+        ) from exc
