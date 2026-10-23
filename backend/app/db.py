@@ -1,7 +1,7 @@
 from datetime import datetime, timezone
 from uuid import uuid4
 
-from sqlalchemy import DateTime, String, create_engine
+from sqlalchemy import DateTime, ForeignKey, String, create_engine
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, sessionmaker
 
@@ -17,7 +17,12 @@ database_url = settings.database_url
 if database_url.startswith("postgresql://"):
     database_url = database_url.replace("postgresql://", "postgresql+psycopg://", 1)
 
-engine = create_engine(database_url, pool_pre_ping=True, pool_recycle=300, connect_args={"connect_timeout": 8})
+engine = create_engine(
+    database_url,
+    pool_pre_ping=True,
+    pool_recycle=300,
+    connect_args={"connect_timeout": 8},
+)
 SessionLocal = sessionmaker(bind=engine, autoflush=False, expire_on_commit=False)
 
 
@@ -46,7 +51,9 @@ class VoiceSession(Base):
 class TraceEvent(Base):
     __tablename__ = "trace_events"
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
-    session_id: Mapped[object | None] = mapped_column(UUID(as_uuid=True), nullable=True, index=True)
+    session_id: Mapped[object | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("voice_sessions.id"), nullable=True, index=True
+    )
     trace_id: Mapped[object] = mapped_column(UUID(as_uuid=True), nullable=False, index=True)
     turn_id: Mapped[str | None] = mapped_column(String(100), nullable=True, index=True)
     tool_execution_id: Mapped[str | None] = mapped_column(String(100), nullable=True, index=True)
@@ -58,7 +65,9 @@ class TraceEvent(Base):
 class ToolExecution(Base):
     __tablename__ = "tool_executions"
     id: Mapped[str] = mapped_column(String(100), primary_key=True)
-    session_id: Mapped[object | None] = mapped_column(UUID(as_uuid=True), nullable=True, index=True)
+    session_id: Mapped[object | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("voice_sessions.id"), nullable=True, index=True
+    )
     trace_id: Mapped[object] = mapped_column(UUID(as_uuid=True), nullable=False, index=True)
     tool_name: Mapped[str] = mapped_column(String(100), nullable=False)
     idempotency_key: Mapped[str] = mapped_column(String(180), nullable=False, unique=True)
