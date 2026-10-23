@@ -8,8 +8,9 @@ from sqlalchemy.orm import Session
 
 from app.config import get_settings
 from app.db import DemoStatus, SessionLocal, TraceEvent, VoiceSession, initialize_database
-from app.schemas import DemoStatusOut, EventOut, SessionCreated, ToolResultOut, UpdateDemoStatusIn
+from app.schemas import DemoStatusOut, EventIn, EventOut, SessionCreated, ToolResultOut, UpdateDemoStatusIn
 from app.services import create_session, end_session, run_update_demo_tool
+from app.tracing import emit_event
 from app.voice import router as voice_router
 
 settings = get_settings()
@@ -70,6 +71,23 @@ def session_events(session_id: UUID, db: Session = Depends(get_db)):
     return db.query(TraceEvent).filter(
         TraceEvent.session_id == session_id
     ).order_by(TraceEvent.id.asc()).all()
+
+
+@app.post("/api/v1/sessions/{session_id}/events", response_model=EventOut)
+def add_session_event(session_id: UUID, body: EventIn, db: Session = Depends(get_db)):
+    session = db.get(VoiceSession, session_id)
+    if session is None:
+        raise HTTPException(status_code=404, detail="Session not found.")
+    if session.status != "active":
+        raise HTTPException(status_code=409, detail="Session has ended.")
+    # Do not persist raw audio here. The frontend is responsible for limiting transcript data.
+    event = emit_event(
+        db, trace_id=session.trace_id, session_id=session.id,
+        turn_id=body.turn_id, event_type=body.event_type, details=body.details,
+    )
+    db.commit()
+    db.refresh(event)
+    return event
 
 
 @app.get("/api/v1/demo/status", response_model=DemoStatusOut)
