@@ -11,6 +11,15 @@ class SessionCreated(BaseModel):
     status: str
 
 
+class EventIn(BaseModel):
+    event_type: Literal[
+        "transcript.final", "voice.command.parse_failed",
+        "response.started", "response.completed", "voice.error",
+    ]
+    turn_id: str | None = Field(default=None, max_length=100)
+    details: dict = Field(default_factory=dict)
+
+
 class EventOut(BaseModel):
     id: int
     session_id: UUID | None
