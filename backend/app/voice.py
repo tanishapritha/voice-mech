@@ -22,7 +22,7 @@ class TokenRequest(BaseModel):
 def create_voice_token(body: TokenRequest):
     if not settings.livekit_url or not settings.livekit_api_key or not settings.livekit_api_secret:
         raise HTTPException(status_code=503, detail="LiveKit credentials are not configured.")
-    room_name = "voice-mech-phase1"
+    room_name = "voice-mech-phase1-" + body.identity
     token = (
         api.AccessToken(settings.livekit_api_key, settings.livekit_api_secret)
         .with_identity(body.identity)
