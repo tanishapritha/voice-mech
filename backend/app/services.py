@@ -12,10 +12,8 @@ def create_session(db: Session, channel: str = "web") -> VoiceSession:
     session = VoiceSession(channel=channel)
     db.add(session)
     db.flush()
-    emit_event(
-        db, trace_id=session.trace_id, session_id=session.id,
-        event_type="session.started", details={"channel": channel},
-    )
+    emit_event(db, trace_id=session.trace_id, session_id=session.id,
+               event_type="session.started", details={"channel": channel})
     db.commit()
     db.refresh(session)
     return session
@@ -28,19 +26,16 @@ def end_session(db: Session, session_id: UUID) -> VoiceSession | None:
     if session.status != "ended":
         session.status = "ended"
         session.ended_at = utcnow()
-        emit_event(
-            db, trace_id=session.trace_id, session_id=session.id,
-            event_type="session.ended", details={"reason": "client_requested"},
-        )
+        emit_event(db, trace_id=session.trace_id, session_id=session.id,
+                   event_type="session.ended", details={"reason": "client_requested"})
         db.commit()
         db.refresh(session)
     return session
 
 
-def run_update_demo_tool(
-    db: Session, *, status: str, idempotency_key: str,
-    session_id: UUID | None, turn_id: str,
-) -> dict:
+def run_update_demo_tool(db: Session, *, status: str, idempotency_key: str,
+                         session_id: UUID | None, turn_id: str) -> dict:
+    # Reserve the idempotency key before mutating operational state, in the same transaction.
     existing = db.query(ToolExecution).filter_by(idempotency_key=idempotency_key).first()
     if existing is not None:
         result = dict(existing.result_json)
@@ -60,15 +55,19 @@ def run_update_demo_tool(
 
     trace_id = session.trace_id if session else uuid4()
     execution_id = str(uuid4())
-    expected_status = status
-    expected_revision = 0
-
     try:
-        emit_event(
-            db, trace_id=trace_id, session_id=session_id, turn_id=turn_id,
-            tool_execution_id=execution_id, event_type="tool.requested",
-            details={"tool": "update_demo_status", "status": status},
+        # Insert a pending execution first. The unique key prevents concurrent duplicates.
+        execution = ToolExecution(
+            id=execution_id, session_id=session_id, trace_id=trace_id,
+            tool_name="update_demo_status", idempotency_key=idempotency_key,
+            outcome="pending", result_json={},
         )
+        db.add(execution)
+        db.flush()
+        emit_event(db, trace_id=trace_id, session_id=session_id, turn_id=turn_id,
+                   tool_execution_id=execution_id, event_type="tool.requested",
+                   details={"tool": "update_demo_status", "status": status})
+
         row = db.execute(
             select(DemoStatus).where(DemoStatus.id == 1).with_for_update()
         ).scalar_one()
@@ -76,25 +75,17 @@ def run_update_demo_tool(
         row.revision += 1
         db.flush()
         expected_status, expected_revision = row.status, row.revision
-        db.add(ToolExecution(
-            id=execution_id, session_id=session_id, trace_id=trace_id,
-            tool_name="update_demo_status", idempotency_key=idempotency_key,
-            outcome="succeeded",
-            result_json={
-                "status": expected_status,
-                "revision": expected_revision,
-                "verified": True,
-            },
-        ))
-        emit_event(
-            db, trace_id=trace_id, session_id=session_id, turn_id=turn_id,
-            tool_execution_id=execution_id, event_type="db.write.completed",
-            details={"record_id": 1, "revision": expected_revision},
-        )
+        execution.outcome = "succeeded"
+        execution.result_json = {
+            "status": expected_status, "revision": expected_revision, "verified": True,
+        }
+        emit_event(db, trace_id=trace_id, session_id=session_id, turn_id=turn_id,
+                   tool_execution_id=execution_id, event_type="db.write.completed",
+                   details={"record_id": 1, "revision": expected_revision})
         db.commit()
     except IntegrityError:
         db.rollback()
-        # Handle two concurrent requests using the same idempotency key.
+        # Another concurrent request may have committed this exact key first.
         prior = db.query(ToolExecution).filter_by(idempotency_key=idempotency_key).first()
         if prior is not None:
             result = dict(prior.result_json)
@@ -110,24 +101,18 @@ def run_update_demo_tool(
         db.rollback()
         raise
 
-    # Verify the persisted value after the write transaction has committed.
+    # Re-read the committed state in a fresh transaction before reporting success.
     db.expire_all()
     committed = db.get(DemoStatus, 1)
     if committed is None or committed.status != expected_status or committed.revision != expected_revision:
         raise RuntimeError("Commit verification failed.")
 
-    emit_event(
-        db, trace_id=trace_id, session_id=session_id, turn_id=turn_id,
-        tool_execution_id=execution_id, event_type="tool.completed",
-        details={"outcome": "succeeded", "revision": committed.revision},
-    )
+    emit_event(db, trace_id=trace_id, session_id=session_id, turn_id=turn_id,
+               tool_execution_id=execution_id, event_type="tool.completed",
+               details={"outcome": "succeeded", "revision": committed.revision})
     db.commit()
     return {
-        "success": True,
-        "tool_execution_id": execution_id,
-        "trace_id": str(trace_id),
-        "status": committed.status,
-        "revision": committed.revision,
-        "verified": True,
-        "message": f"Status updated to {committed.status}.",
+        "success": True, "tool_execution_id": execution_id, "trace_id": str(trace_id),
+        "status": committed.status, "revision": committed.revision, "verified": True,
+        "message": "Status updated to " + committed.status + ".",
     }
