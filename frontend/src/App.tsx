@@ -37,7 +37,7 @@ export default function App() {
   const [busy, setBusy] = useState(false);
   const [listening, setListening] = useState(false);
   const [error, setError] = useState("");
-  const [notice, setNotice] = useState("Start a session, then speak a status command.");
+  const [notice, setNotice] = useState("");
   const [selectedStatus, setSelectedStatus] = useState<DemoStatus["status"]>("working");
   const [transcript, setTranscript] = useState("");
   const [interim, setInterim] = useState("");
